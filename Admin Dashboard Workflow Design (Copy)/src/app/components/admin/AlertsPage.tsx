@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft, ChevronRight, AlertTriangle, Clock, History, FileText } from 'lucide-react';
-import { stores, Alert } from '../../mockData';
 import { ReportModal } from '../shared/ReportModal';
 import { useT } from '../../ThemeContext';
+import { getAlertSummary, getAlerts, getStore, getStores, reviewAlert, reviewAllAlerts, type Alert, type StoreSummary } from '../../api';
 
 interface Props {
   navigate: (view: string, params?: Record<string, unknown>) => void;
@@ -13,9 +13,9 @@ interface Props {
 }
 
 const alertColors: Record<string, { bg: string; badge: string }> = {
-  critical: { bg: 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800',     badge: 'bg-red-600 text-white' },
-  warning:  { bg: 'bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800', badge: 'bg-amber-500 text-white' },
-  fraud:    { bg: 'bg-orange-50 border-orange-200 dark:bg-orange-900/20 dark:border-orange-800', badge: 'bg-orange-600 text-white' },
+  critical: { bg: 'bg-red-50 border-red-200 dark:bg-red-900/20 dark:border-red-800', badge: 'bg-red-600 text-white' },
+  warning: { bg: 'bg-amber-50 border-amber-200 dark:bg-amber-900/20 dark:border-amber-800', badge: 'bg-amber-500 text-white' },
+  fraud: { bg: 'bg-orange-50 border-orange-200 dark:bg-orange-900/20 dark:border-orange-800', badge: 'bg-orange-600 text-white' },
 };
 
 function AlertCard({ alert, onClick }: { alert: Alert; onClick?: () => void }) {
@@ -38,8 +38,21 @@ function AlertCard({ alert, onClick }: { alert: Alert; onClick?: () => void }) {
 
 function HistoryView({ storeId, goBack }: { storeId?: string; goBack: () => void }) {
   const t = useT();
-  const histAlerts = storeId ? stores.find(s => s.id === storeId)?.alerts || [] : stores.flatMap(s => s.alerts);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [storeName, setStoreName] = useState<string>('All Stores');
   const [showReport, setShowReport] = useState(false);
+
+  useEffect(() => {
+    Promise.all([getAlerts(storeId), storeId ? getStore(storeId) : Promise.resolve(null)])
+      .then(([items, store]) => {
+        setAlerts(items);
+        setStoreName(store ? `${store.name} ${store.storeNumber}` : 'All Stores');
+      })
+      .catch(() => {
+        setAlerts([]);
+      });
+  }, [storeId]);
+
   return (
     <div className={`flex-1 overflow-y-auto pb-6 ${t.page}`}>
       <div className={`px-4 py-3 border-b flex items-center justify-between ${t.header}`}>
@@ -47,7 +60,7 @@ function HistoryView({ storeId, goBack }: { storeId?: string; goBack: () => void
           <button onClick={goBack} className={`p-1.5 rounded-full ${t.hoverRow}`}><ChevronLeft className="w-5 h-5 text-orange-500" /></button>
           <div>
             <h2 className={`font-semibold text-sm ${t.text}`}>Alert History</h2>
-            <p className={`text-xs ${t.textXs}`}>{storeId ? stores.find(s => s.id === storeId)?.name : 'All Stores'}</p>
+            <p className={`text-xs ${t.textXs}`}>{storeName}</p>
           </div>
         </div>
         <button onClick={() => setShowReport(true)} className="flex items-center gap-1.5 text-xs text-orange-500 bg-orange-50 dark:bg-orange-900/30 px-3 py-1.5 rounded-full">
@@ -55,22 +68,36 @@ function HistoryView({ storeId, goBack }: { storeId?: string; goBack: () => void
         </button>
       </div>
       <div className="px-4 pt-4 space-y-3">
-        <div className={`text-xs font-medium ${t.textXs}`}>Today — {histAlerts.length} records</div>
-        {histAlerts.map(a => <AlertCard key={a.id} alert={a} />)}
+        <div className={`text-xs font-medium ${t.textXs}`}>Today — {alerts.length} records</div>
+        {alerts.map(a => <AlertCard key={a.id} alert={a} />)}
         <div className={`text-xs text-center pt-2 ${t.textMuted}`}>No earlier records</div>
       </div>
-      {showReport && <ReportModal title="Alert History" context="Historical alert records" onClose={() => setShowReport(false)} />}
+      {showReport && <ReportModal title="Alert History" context="Historical alert records" storeId={storeId} onClose={() => setShowReport(false)} />}
     </div>
   );
 }
 
 function AlertDetailView({ storeId, alertId, goBack, navigate }: { storeId: string; alertId: string; goBack: () => void; navigate: (v: string, p?: Record<string, unknown>) => void }) {
   const t = useT();
-  const store = stores.find(s => s.id === storeId);
-  const alert = store?.alerts.find(a => a.id === alertId);
+  const [alert, setAlert] = useState<Alert | null>(null);
+  const [store, setStore] = useState<StoreSummary | null>(null);
   const [showReport, setShowReport] = useState(false);
+
+  useEffect(() => {
+    Promise.all([getAlerts(storeId), getStore(storeId)])
+      .then(([alerts, storeData]) => {
+        setAlert(alerts.find(item => item.id === alertId) ?? null);
+        setStore(storeData);
+      })
+      .catch(() => {
+        setAlert(null);
+        setStore(null);
+      });
+  }, [storeId, alertId]);
+
   if (!alert || !store) return null;
   const c = alertColors[alert.type];
+
   return (
     <div className={`flex-1 overflow-y-auto pb-6 ${t.page}`}>
       <div className={`px-4 py-3 border-b flex items-center justify-between ${t.header}`}>
@@ -106,23 +133,40 @@ function AlertDetailView({ storeId, alertId, goBack, navigate }: { storeId: stri
           <div className="flex justify-between text-sm"><span className={t.textMuted}>Compliance</span><span className={`font-medium ${store.compliance >= 85 ? 'text-green-600' : store.compliance >= 70 ? 'text-amber-600' : 'text-red-600'}`}>{store.compliance}%</span></div>
         </div>
 
-        <button onClick={goBack} className="w-full py-3 bg-orange-500 text-white rounded-xl font-semibold hover:bg-orange-600 transition-colors">
+        <button
+          onClick={() => reviewAlert(alert.id, store.manager, storeId).then(() => goBack())}
+          className="w-full py-3 bg-orange-500 text-white rounded-xl font-semibold hover:bg-orange-600 transition-colors"
+        >
           Mark as Reviewed
         </button>
       </div>
-      {showReport && <ReportModal title={`Alert: ${alert.title}`} context={`Store: ${store.name}`} onClose={() => setShowReport(false)} />}
+      {showReport && <ReportModal title={`Alert: ${alert.title}`} context={`Store: ${store.name}`} storeId={storeId} onClose={() => setShowReport(false)} />}
     </div>
   );
 }
 
 function StorewiseAlertsView({ storeId, goBack, navigate }: { storeId: string; goBack: () => void; navigate: (v: string, p?: Record<string, unknown>) => void }) {
   const t = useT();
-  const store = stores.find(s => s.id === storeId);
+  const [store, setStore] = useState<StoreSummary | null>(null);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [showReport, setShowReport] = useState(false);
+
+  useEffect(() => {
+    Promise.all([getStore(storeId), getAlerts(storeId)])
+      .then(([storeData, items]) => {
+        setStore(storeData);
+        setAlerts(items);
+      })
+      .catch(() => {
+        setStore(null);
+        setAlerts([]);
+      });
+  }, [storeId]);
+
   if (!store) return null;
-  const critical = store.alerts.filter(a => a.type === 'critical').length;
-  const warnings  = store.alerts.filter(a => a.type === 'warning').length;
-  const fraud     = store.alerts.filter(a => a.type === 'fraud').length;
+  const critical = alerts.filter(a => a.type === 'critical').length;
+  const warnings = alerts.filter(a => a.type === 'warning').length;
+  const fraud = alerts.filter(a => a.type === 'fraud').length;
 
   return (
     <div className={`flex-1 overflow-y-auto pb-6 ${t.page}`}>
@@ -160,26 +204,41 @@ function StorewiseAlertsView({ storeId, goBack, navigate }: { storeId: string; g
           </div>
         </div>
         <div className="space-y-3">
-          {store.alerts.map(a => (
+          {alerts.map(a => (
             <AlertCard key={a.id} alert={a} onClick={() => navigate('store-alert-detail', { storeId, alertId: a.id })} />
           ))}
+          <button
+            onClick={() => reviewAllAlerts(storeId, store.manager).then(() => setAlerts([]))}
+            className="w-full py-3 bg-orange-500 text-white rounded-xl font-semibold hover:bg-orange-600 transition-colors"
+          >
+            Review All Alerts
+          </button>
         </div>
       </div>
-      {showReport && <ReportModal title={`${store.name} Alerts`} context={`${store.alerts.length} alerts`} onClose={() => setShowReport(false)} />}
+      {showReport && <ReportModal title={`${store.name} Alerts`} context={`${alerts.length} alerts`} storeId={storeId} onClose={() => setShowReport(false)} />}
     </div>
   );
 }
 
 function GlobalAlertsView({ goBack, navigate }: { goBack: () => void; navigate: (v: string, p?: Record<string, unknown>) => void }) {
   const t = useT();
-  const [activeTab, setActiveTab]   = useState<'alerts' | 'history'>('alerts');
   const [showReport, setShowReport] = useState(false);
-  const allAlerts = stores.flatMap(s => s.alerts);
-  const critical  = allAlerts.filter(a => a.type === 'critical').length;
-  const warnings  = allAlerts.filter(a => a.type === 'warning').length;
-  const fraud     = allAlerts.filter(a => a.type === 'fraud').length;
+  const [stores, setStores] = useState<StoreSummary[]>([]);
+  const [allAlerts, setAllAlerts] = useState<Alert[]>([]);
+  const [summary, setSummary] = useState({ critical: 0, warning: 0, fraud: 0 });
 
-  if (activeTab === 'history') return <HistoryView goBack={() => setActiveTab('alerts')} />;
+  useEffect(() => {
+    Promise.all([getStores(), getAlerts(), getAlertSummary()])
+      .then(([storeList, alertList, alertSummary]) => {
+        setStores(storeList);
+        setAllAlerts(alertList);
+        setSummary({ critical: alertSummary.critical, warning: alertSummary.warning, fraud: alertSummary.fraud });
+      })
+      .catch(() => {
+        setStores([]);
+        setAllAlerts([]);
+      });
+  }, []);
 
   return (
     <div className={`flex-1 overflow-y-auto pb-6 ${t.page}`}>
@@ -189,9 +248,6 @@ function GlobalAlertsView({ goBack, navigate }: { goBack: () => void; navigate: 
           <h2 className={`font-semibold text-sm ${t.text}`}>Alerts &amp; History</h2>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setActiveTab('history')} className={`flex items-center gap-1 text-xs px-3 py-1.5 rounded-full ${t.badge}`}>
-            <History className="w-3.5 h-3.5" /> History
-          </button>
           <button onClick={() => setShowReport(true)} className="flex items-center gap-1.5 text-xs text-orange-500 bg-orange-50 dark:bg-orange-900/30 px-3 py-1.5 rounded-full">
             <FileText className="w-3.5 h-3.5" /> Report
           </button>
@@ -201,23 +257,22 @@ function GlobalAlertsView({ goBack, navigate }: { goBack: () => void; navigate: 
       <div className="px-4 pt-4 space-y-4">
         <div className="grid grid-cols-3 gap-2">
           <div className="bg-red-600 rounded-xl p-3 text-center text-white">
-            <div className="text-xl font-bold">{critical}</div>
+            <div className="text-xl font-bold">{summary.critical}</div>
             <div className="text-xs text-red-200">Critical</div>
           </div>
           <div className="bg-amber-500 rounded-xl p-3 text-center text-white">
-            <div className="text-xl font-bold">{warnings}</div>
+            <div className="text-xl font-bold">{summary.warning}</div>
             <div className="text-xs text-amber-100">Warnings</div>
           </div>
           <div className="bg-orange-600 rounded-xl p-3 text-center text-white">
-            <div className="text-xl font-bold">{fraud}</div>
+            <div className="text-xl font-bold">{summary.fraud}</div>
             <div className="text-xs text-orange-100">Fraud Risk</div>
           </div>
         </div>
 
         {stores.map(store => (
           <div key={store.id} className={`rounded-2xl border shadow-sm overflow-hidden ${t.card}`}>
-            <button onClick={() => navigate('storewise-alerts', { storeId: store.id })}
-              className={`w-full flex items-center justify-between px-4 py-3 border-b ${t.border} ${t.hoverRow} transition-colors`}>
+            <button onClick={() => navigate('storewise-alerts', { storeId: store.id })} className={`w-full flex items-center justify-between px-4 py-3 border-b ${t.border} ${t.hoverRow} transition-colors`}>
               <div className="flex items-center gap-2">
                 <AlertTriangle className="w-4 h-4 text-red-500" />
                 <div className="text-left">
@@ -228,12 +283,12 @@ function GlobalAlertsView({ goBack, navigate }: { goBack: () => void; navigate: 
               <ChevronRight className={`w-4 h-4 ${t.textMuted}`} />
             </button>
             <div className={`divide-y ${t.divide}`}>
-              {store.alerts.slice(0, 2).map(a => (
+              {allAlerts.filter(a => a.storeId === store.id).slice(0, 2).map(a => (
                 <AlertCard key={a.id} alert={a} onClick={() => navigate('store-alert-detail', { storeId: store.id, alertId: a.id })} />
               ))}
-              {store.alerts.length > 2 && (
+              {allAlerts.filter(a => a.storeId === store.id).length > 2 && (
                 <button onClick={() => navigate('storewise-alerts', { storeId: store.id })} className={`w-full text-xs text-orange-500 py-2.5 ${t.hoverRow} text-center`}>
-                  +{store.alerts.length - 2} more alerts →
+                  +{allAlerts.filter(a => a.storeId === store.id).length - 2} more alerts →
                 </button>
               )}
             </div>

@@ -53,17 +53,20 @@ def _serialize_user(user: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def register_user(data):
-    if _query_user_by_user_id(data.user_id) or _query_user_by_username(getattr(data, "username", data.user_id)):
+    user_id = getattr(data, "user_id", None) or getattr(data, "username", None) or data.name.lower().replace(" ", "-")
+    username = getattr(data, "username", None) or user_id
+
+    if _query_user_by_user_id(user_id) or _query_user_by_username(username):
         return {
             "status": "error",
             "message": "User already exists",
         }
 
     user_document = {
-        "id": data.user_id,
-        "user_id": data.user_id,
+        "id": user_id,
+        "user_id": user_id,
         "name": data.name,
-        "username": getattr(data, "username", data.user_id),
+        "username": username,
         "email": data.email,
         "password_hash": pwd_context.hash(data.password),
         "role": data.role,

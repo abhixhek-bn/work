@@ -1,19 +1,10 @@
-import { useState, useRef, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, Send, Bot, User, ChevronRight, X, FileText } from 'lucide-react';
-import { stores as initialStores } from '../../mockData';
-import { ReportModal } from '../shared/ReportModal';
 import { useT } from '../../ThemeContext';
+import { createStore, deleteStore, getGlobalDashboard, getStores, type StoreSummary } from '../../api';
+import { ReportModal } from '../shared/ReportModal';
 
-interface StoreEntry {
-  id: string;
-  name: string;
-  storeNumber: string;
-  location: string;
-  manager: string;
-  compliance: number;
-  nfcCount: number;
-  activeAlerts: number;
-}
+interface StoreEntry extends StoreSummary {}
 
 interface ChatMessage {
   id: string;
@@ -22,41 +13,56 @@ interface ChatMessage {
   time: string;
 }
 
-const BOT_RESPONSES: Record<string, string> = {
-  compliance: 'Overall compliance across all stores is averaging 83%. FreshMart #042 leads at 85%, CityMart #031 is at 91%, while QuickShop #018 needs attention at 72%.',
-  alert: 'Currently there are 9 active alerts across all stores. 3 critical (missed rounds), 4 warnings (at-risk zones), and 2 fraud risk detections. QuickShop #018 has the highest alert count at 5.',
-  nfc: 'Total NFC tags deployed: 26 across 3 stores. FreshMart #042 has 12 tags, QuickShop #018 has 8, and CityMart #031 has 6.',
-  freshmart: 'FreshMart Superstore #042 is at 85% compliance today. Manager: James Okafor. 12 NFC tags deployed, 3 active alerts including a GPS mismatch at Checkout Lane 3.',
-  quickshop: 'QuickShop Mall #018 has the lowest compliance at 72%. Manager: Sara Thompson. 5 active alerts — recommend immediate review of Restrooms East and Loading Bay.',
-  citymart: 'CityMart Express #031 is performing well at 91% compliance. Manager: Ana Rivera. Only 1 active warning for the Storage Room. 6 NFC tags deployed.',
-  round: 'Today\'s rounds are on schedule for most stores. FreshMart has 2 completed rounds, QuickShop has 1 in progress, and CityMart has 3 completed rounds.',
-  staff: 'Staff performance varies. Maria Santos leads at 94% compliance. James Okafor is at 71%, and Priya Nair needs immediate follow-up — only 1 of 4 rounds completed today.',
-  default: 'I can help you with information about store compliance, NFC tags, alerts, rounds, and staff performance. Try asking about a specific store or topic!',
-};
+function buildReply(message: string, stores: StoreEntry[]): string {
+  const lower = message.toLowerCase();
+  const avgCompliance = stores.length ? Math.round(stores.reduce((s, st) => s + st.compliance, 0) / stores.length) : 0;
+  const topStore = [...stores].sort((a, b) => b.compliance - a.compliance)[0];
+  const alertCount = stores.reduce((s, st) => s + st.activeAlerts, 0);
 
-function getBotReply(msg: string): string {
-  const lower = msg.toLowerCase();
-  if (lower.includes('compliance') || lower.includes('percent')) return BOT_RESPONSES.compliance;
-  if (lower.includes('alert') || lower.includes('warning') || lower.includes('critical')) return BOT_RESPONSES.alert;
-  if (lower.includes('nfc') || lower.includes('tag')) return BOT_RESPONSES.nfc;
-  if (lower.includes('freshmart') || lower.includes('042')) return BOT_RESPONSES.freshmart;
-  if (lower.includes('quickshop') || lower.includes('018')) return BOT_RESPONSES.quickshop;
-  if (lower.includes('citymart') || lower.includes('031')) return BOT_RESPONSES.citymart;
-  if (lower.includes('round') || lower.includes('scan')) return BOT_RESPONSES.round;
-  if (lower.includes('staff') || lower.includes('cleaner') || lower.includes('maria') || lower.includes('james') || lower.includes('priya')) return BOT_RESPONSES.staff;
-  return BOT_RESPONSES.default;
+  if (lower.includes('compliance') || lower.includes('percent')) {
+    return `Overall compliance across ${stores.length} stores is averaging ${avgCompliance}%. ${topStore ? `${topStore.name} ${topStore.storeNumber} is leading at ${topStore.compliance}%.` : ''}`;
+  }
+  if (lower.includes('alert') || lower.includes('warning') || lower.includes('critical')) {
+    return `There are ${alertCount} active alerts across ${stores.length} stores right now. The backend alert list is live, so reviewing the Alerts tab will show the current status.`;
+  }
+  if (lower.includes('nfc') || lower.includes('tag')) {
+    const totalTags = stores.reduce((s, st) => s + st.nfcCount, 0);
+    return `Total NFC tags deployed: ${totalTags} across ${stores.length} stores. Use the Store Dashboard or NFC Tag Registry to review live tags.`;
+  }
+  if (lower.includes('round') || lower.includes('scan')) {
+    return `Rounds are now loaded from the backend per store. Open a store dashboard to see the live round list and scan history.`;
+  }
+  return 'I can help summarize live stores, NFC tags, alerts, rounds, and compliance. Ask about a store or a metric and I will use the current backend data.';
 }
 
 function AddStoreModal({ onClose, onAdd }: { onClose: () => void; onAdd: (s: StoreEntry) => void }) {
   const t = useT();
-  const [name, setName]         = useState('');
-  const [num, setNum]           = useState('');
+  const [name, setName] = useState('');
+  const [num, setNum] = useState('');
   const [location, setLocation] = useState('');
-  const [manager, setManager]   = useState('');
+  const [manager, setManager] = useState('');
 
-  const submit = () => {
+  const submit = async () => {
     if (!name || !num) return;
-    onAdd({ id: `store-${Date.now()}`, name, storeNumber: `#${num}`, location, manager, compliance: 0, nfcCount: 0, activeAlerts: 0 });
+    const payload = {
+      id: `store-${Date.now()}`,
+      name,
+      storeNumber: `#${num}`,
+      location,
+      manager,
+    };
+    const created = await createStore(payload);
+    onAdd({
+      id: created.id,
+      name: created.name,
+      storeNumber: created.storeNumber,
+      location: created.location,
+      manager: created.manager,
+      compliance: created.compliance ?? 0,
+      nfcCount: created.nfcCount ?? 0,
+      activeAlerts: created.activeAlerts ?? 0,
+      lastSync: created.lastSync ?? '—',
+    });
     onClose();
   };
 
@@ -76,12 +82,10 @@ function AddStoreModal({ onClose, onAdd }: { onClose: () => void; onAdd: (s: Sto
           ].map(f => (
             <div key={f.label}>
               <label className={`block text-xs mb-1 ${t.textXs}`}>{f.label}</label>
-              <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.ph}
-                className={`w-full px-3 py-2.5 border rounded-xl text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 ${t.input}`} />
+              <input value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.ph} className={`w-full px-3 py-2.5 border rounded-xl text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 ${t.input}`} />
             </div>
           ))}
-          <button onClick={submit} disabled={!name || !num}
-            className="w-full py-3 bg-orange-500 text-white rounded-xl font-semibold disabled:opacity-50 hover:bg-orange-600 mt-2">
+          <button onClick={submit} disabled={!name || !num} className="w-full py-3 bg-orange-500 text-white rounded-xl font-semibold disabled:opacity-50 hover:bg-orange-600 mt-2">
             Add Store
           </button>
         </div>
@@ -91,17 +95,23 @@ function AddStoreModal({ onClose, onAdd }: { onClose: () => void; onAdd: (s: Sto
 }
 
 export function HomeTab() {
-  const [storeList, setStoreList] = useState<StoreEntry[]>(initialStores as StoreEntry[]);
+  const [storeList, setStoreList] = useState<StoreEntry[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
-    { id: '1', role: 'bot', text: 'Hi! I\'m the CleanCheck AI assistant. Ask me anything about your stores — compliance, alerts, staff, or NFC tags!', time: 'Now' }
+    { id: '1', role: 'bot', text: 'Hi! I\'m the CleanCheck assistant. Ask me anything about your stores, alerts, compliance, or NFC tags.', time: 'Now' }
   ]);
   const [input, setInput] = useState('');
   const [typing, setTyping] = useState(false);
   const [showReport, setShowReport] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const t = useT();
+
+  useEffect(() => {
+    getStores().then(setStoreList).catch(() => setStoreList([]));
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -116,16 +126,15 @@ export function HomeTab() {
     setTyping(true);
     setTimeout(() => {
       setTyping(false);
-      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'bot', text: getBotReply(q), time: 'Now' }]);
-    }, 1000 + Math.random() * 500);
+      setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'bot', text: buildReply(q, storeList), time: 'Now' }]);
+    }, 500);
   };
 
-  const confirmDelete = (id: string) => {
+  const confirmDelete = async (id: string) => {
+    await deleteStore(id);
     setStoreList(prev => prev.filter(s => s.id !== id));
     setDeleteId(null);
   };
-
-  const t = useT();
 
   return (
     <div className={`flex-1 overflow-y-auto pb-6 ${t.page}`}>
@@ -140,7 +149,6 @@ export function HomeTab() {
       </div>
 
       <div className="px-4 pt-4 space-y-4">
-        {/* Summary */}
         <div className="grid grid-cols-3 gap-3">
           <div className={`rounded-2xl p-3 border shadow-sm text-center ${t.card}`}>
             <div className="text-2xl font-bold text-red-600">{storeList.length}</div>
@@ -156,7 +164,6 @@ export function HomeTab() {
           </div>
         </div>
 
-        {/* Stores */}
         <div className={`rounded-2xl border shadow-sm overflow-hidden ${t.card}`}>
           <div className={`px-4 py-3 border-b ${t.border} flex items-center justify-between`}>
             <h3 className={`font-semibold text-sm ${t.text}`}>Stores</h3>
@@ -179,21 +186,17 @@ export function HomeTab() {
               </button>
             </div>
           ))}
-          {storeList.length === 0 && (
-            <div className={`px-4 py-8 text-center text-sm ${t.textMuted}`}>No stores yet. Add your first store.</div>
-          )}
+          {storeList.length === 0 && <div className={`px-4 py-8 text-center text-sm ${t.textMuted}`}>No stores yet. Add your first store.</div>}
         </div>
 
-        {/* Chatbot */}
         <div className={`rounded-2xl border shadow-sm overflow-hidden ${t.card}`}>
-          <button onClick={() => setChatOpen(!chatOpen)}
-            className={`w-full px-4 py-3.5 flex items-center justify-between ${t.hoverRow} transition-colors`}>
+          <button onClick={() => setChatOpen(!chatOpen)} className={`w-full px-4 py-3.5 flex items-center justify-between ${t.hoverRow} transition-colors`}>
             <div className="flex items-center gap-3">
               <div className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center">
                 <Bot className="w-5 h-5 text-white" />
               </div>
               <div className="text-left">
-                <div className={`text-sm font-semibold ${t.text}`}>AI Store Assistant</div>
+                <div className={`text-sm font-semibold ${t.text}`}>Live Store Assistant</div>
                 <div className={`text-xs ${t.textXs}`}>Ask anything about your stores</div>
               </div>
             </div>
@@ -228,21 +231,10 @@ export function HomeTab() {
                 <div ref={chatEndRef} />
               </div>
               <div className={`px-4 py-3 border-t ${t.border} flex gap-2`}>
-                <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()}
-                  placeholder="Ask about any store..."
-                  className={`flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 ${t.input}`} />
-                <button onClick={sendMessage} disabled={!input.trim()}
-                  className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center disabled:opacity-50 hover:bg-orange-600 transition-colors shrink-0">
+                <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} placeholder="Ask about any store..." className={`flex-1 px-3 py-2 border rounded-xl text-sm focus:outline-none focus:border-orange-400 focus:ring-2 focus:ring-orange-100 ${t.input}`} />
+                <button onClick={sendMessage} disabled={!input.trim()} className="w-9 h-9 bg-orange-500 rounded-xl flex items-center justify-center disabled:opacity-50 hover:bg-orange-600 transition-colors shrink-0">
                   <Send className="w-4 h-4 text-white" />
                 </button>
-              </div>
-              <div className="px-4 pb-3 flex gap-2 overflow-x-auto">
-                {['Overall compliance?', 'Active alerts?', 'FreshMart status', 'Staff performance'].map(q => (
-                  <button key={q} onClick={() => setInput(q)}
-                    className={`text-xs text-orange-500 bg-orange-50 dark:bg-orange-900/30 px-3 py-1.5 rounded-full whitespace-nowrap hover:bg-orange-100 dark:hover:bg-orange-900/40 border border-orange-100 dark:border-orange-800`}>
-                    {q}
-                  </button>
-                ))}
               </div>
             </div>
           )}

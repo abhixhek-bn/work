@@ -3,8 +3,7 @@ import { LoginPage } from './components/LoginPage';
 import { AdminApp } from './components/admin/AdminApp';
 import { CleanerApp } from './components/cleaner/CleanerApp';
 import { ThemeProvider, useTheme } from './ThemeContext';
-
-type AppUser = { role: 'admin' | 'cleaner'; name: string; id: string };
+import type { AppUser } from './api';
 
 export default function App() {
   return (

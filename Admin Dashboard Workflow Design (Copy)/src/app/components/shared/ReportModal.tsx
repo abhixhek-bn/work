@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { X, FileText, Download, CheckCircle, Calendar } from 'lucide-react';
 import { useT } from '../../ThemeContext';
+import { API_BASE_URL, generateReport, type ReportRecord } from '../../api';
 
 interface Props {
   title: string;
   context?: string;
+  storeId?: string;
   onClose: () => void;
 }
 
@@ -20,7 +22,7 @@ function formatDate(iso: string) {
   return `${d}/${m}/${y}`;
 }
 
-export function ReportModal({ title, context, onClose }: Props) {
+export function ReportModal({ title, context, storeId, onClose }: Props) {
   const t = useT();
   const today = todayStr();
   const [selected, setSelected] = useState<string[]>(['Compliance Summary', 'Alert History']);
@@ -29,6 +31,8 @@ export function ReportModal({ title, context, onClose }: Props) {
   const [endDate, setEndDate]     = useState(today);
   const [generated, setGenerated] = useState(false);
   const [loading, setLoading]     = useState(false);
+  const [report, setReport]       = useState<ReportRecord | null>(null);
+  const [error, setError]         = useState('');
 
   const toggle = (type: string) =>
     setSelected(prev => prev.includes(type) ? prev.filter(x => x !== type) : [...prev, type]);
@@ -49,7 +53,24 @@ export function ReportModal({ title, context, onClose }: Props) {
 
   const generate = () => {
     setLoading(true);
-    setTimeout(() => { setLoading(false); setGenerated(true); }, 1200);
+    setError('');
+    generateReport({
+      title,
+      context,
+      report_types: selected,
+      format,
+      start_date: startDate,
+      end_date: endDate,
+      store_id: storeId,
+    })
+      .then(result => {
+        setReport(result);
+        setGenerated(true);
+      })
+      .catch(err => {
+        setError(err instanceof Error ? err.message : 'Unable to generate report.');
+      })
+      .finally(() => setLoading(false));
   };
 
   return (
@@ -147,6 +168,7 @@ export function ReportModal({ title, context, onClose }: Props) {
               className="w-full py-3 bg-red-600 text-white rounded-xl font-semibold disabled:opacity-50 hover:bg-red-700 transition-colors">
               {loading ? 'Generating...' : 'Generate Report'}
             </button>
+            {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
           </>
         ) : (
           <div className="text-center py-6">
@@ -158,7 +180,10 @@ export function ReportModal({ title, context, onClose }: Props) {
             <p className={`text-xs mb-4 ${t.textMuted}`}>
               {dateLabel} · {format.toUpperCase()} · {selected.length} section{selected.length !== 1 ? 's' : ''}
             </p>
-            <button className="w-full py-3 bg-red-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-red-700">
+            <button
+              onClick={() => report?.download_url && window.open(`${API_BASE_URL}${report.download_url}`, '_blank', 'noopener,noreferrer')}
+              className="w-full py-3 bg-red-600 text-white rounded-xl font-semibold flex items-center justify-center gap-2 hover:bg-red-700"
+            >
               <Download className="w-4 h-4" /> Download Report
             </button>
             <button onClick={onClose} className={`w-full mt-2 py-3 border rounded-xl text-sm ${t.borderGray} ${t.textSm}`}>Close</button>

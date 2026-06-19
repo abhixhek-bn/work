@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 
 class UserCreateRequest(BaseModel):
+    user_id: Optional[str] = None
     name: str = Field(min_length=2)
     username: str = Field(min_length=2)
     password: str = Field(min_length=6)
@@ -29,4 +30,3 @@ class UserResponse(BaseModel):
     shift_start: Optional[str] = None
     shift_end: Optional[str] = None
     joined_at: Optional[str] = None
-
