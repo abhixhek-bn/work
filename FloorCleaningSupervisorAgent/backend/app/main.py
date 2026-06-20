@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 
+print("MAIN.PY LOADED")
+print("FILE =", Path(__file__).resolve())
 from app.routes import (
     alert_routes,
     audit_routes,
@@ -17,15 +20,12 @@ from app.routes import (
 )
 from app.core.database import checkpoints_container
 
-app = FastAPI(title="Floor Cleaning Supervisor API")
+app = FastAPI(title="Abhishek API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -42,8 +42,12 @@ app.include_router(dashboard_routes.router)
 app.include_router(report_routes.router)
 app.include_router(settings_routes.router)
 app.include_router(audit_routes.router)
-
-
+@app.get("/cors-test")
+def cors_test():
+    return {"message": "cors working"}
+@app.get("/abc123")
+def abc123():
+    return {"test": "working"}
 @app.get("/test-db")
 def test_db():
     try:

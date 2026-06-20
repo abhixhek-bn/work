@@ -1,5 +1,5 @@
 export type Role = 'admin' | 'cleaner';
-
+console.log("API URL=", import.meta.env.VITE_API_BASE_URL);
 export interface AppUser {
   role: Role;
   name: string;
@@ -220,7 +220,7 @@ export interface UserRecord {
   joined_at?: string | null;
 }
 
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || 'http://127.0.0.1:8002';
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') || 'http://127.0.0.1:8010';
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
@@ -228,7 +228,6 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       'Content-Type': 'application/json',
       ...(init.headers || {}),
     },
-    credentials: 'include',
     ...init,
   });
 
